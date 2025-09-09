@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node --loader ts-node/esm snapshot.mts"
+    "start": "node --loader ts-node/esm snapshot.mts",
+    "inbound": "node --loader ts-node/esm inbound.mts --asset USDC --year 2024"
   },
   "repository": {
     "type": "git",

@@ -9,6 +9,8 @@ import {
 } from "viem";
 import axios from "axios";
 
+import { mkdir, writeFile } from "node:fs/promises";
+
 /** ======= TYPES UP TOP (no hoisting footgun) ======= */
 type ChainName = "base" | "optimism";
 
@@ -201,6 +203,21 @@ function toFixed(n: number, d = 6) {
   return Number.isFinite(n) ? n.toFixed(d) : "NaN";
 }
 
+// --- CSV helpers
+function csvEscape(value: string): string {
+  if (value == null) return "";
+  const needsQuotes = /[",\n]/.test(value);
+  const escaped = value.replace(/"/g, '""');
+  return needsQuotes ? `"${escaped}"` : escaped;
+}
+
+function toCsvLine(columns: (string | number | null | undefined)[]): string {
+  return columns
+    .map((c) => (typeof c === "number" ? String(c) : c ?? ""))
+    .map(csvEscape)
+    .join(",");
+}
+
 async function main() {
   if (
     !RPC.base ||
@@ -248,6 +265,23 @@ async function main() {
     }),
   );
 
+  // CSV rows accumulator
+  const csvRows: string[] = [];
+  const header = [
+    "date_iso",
+    "chain",
+    "block_number",
+    "wallet",
+    "asset_type",
+    "symbol",
+    "token_address",
+    "token_decimals",
+    "balance",
+    "usd_price_on_date",
+    "usd_value",
+  ];
+  csvRows.push(toCsvLine(header));
+
   for (const chain of CHAINS) {
     // If any scoped wallets are provided, only run for chains that have scoped wallets
     if (anyScoped && scoped[chain.name].length === 0) continue;
@@ -273,6 +307,23 @@ async function main() {
       } else {
         console.log(`ETH=${toFixed(eth, 6)}`);
       }
+
+      // Push native ETH row
+      csvRows.push(
+        toCsvLine([
+          DATE_ISO,
+          chain.name,
+          String(block),
+          wallet,
+          "native",
+          "ETH",
+          "",
+          "18",
+          eth.toFixed(6),
+          ethUsd != null ? toFixed(ethUsd, 2) : "",
+          ethUsd != null ? toFixed(eth * ethUsd, 2) : "",
+        ]),
+      );
       for (const token of TOKENS[chain.name]) {
         const raw = (await client.readContract({
           address: token.address as Address,
@@ -290,9 +341,33 @@ async function main() {
         } else {
           console.log(`${token.symbol}=${balance.toFixed(6)}`);
         }
+
+        // Push ERC20 row
+        csvRows.push(
+          toCsvLine([
+            DATE_ISO,
+            chain.name,
+            String(block),
+            wallet,
+            "erc20",
+            token.symbol,
+            token.address,
+            String(token.decimals),
+            balance.toFixed(6),
+            usd != null ? toFixed(usd, 6) : "",
+            usd != null ? toFixed(balance * usd, 2) : "",
+          ]),
+        );
       }
     }
   }
+
+  // Ensure output directory exists and write CSV
+  const outDir = "csvs";
+  const outFile = `${outDir}/eoy_2024.csv`;
+  await mkdir(outDir, { recursive: true });
+  await writeFile(outFile, csvRows.join("\n"), "utf8");
+  console.log(`\nWrote ${csvRows.length - 1} data rows to ./${outFile}`);
 }
 
 main().catch((e) => {
